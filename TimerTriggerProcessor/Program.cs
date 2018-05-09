@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace TimerTriggerProcessor
 {
@@ -11,7 +12,8 @@ namespace TimerTriggerProcessor
     {
         static void Main(string[] args)
         {
-            Dictionary<string, int> _triggersByType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            StringCounter _triggersCounter = new StringCounter();
+            StringCounter _funcNameCounter = new StringCounter();
             int appsWithFrequentTimerTriggers = 0;
 
             foreach (var line in File.ReadAllLines(args[0]).Skip(1))
@@ -34,7 +36,7 @@ namespace TimerTriggerProcessor
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"{lastModifiedTime}: ERROR: can't parse json '{jsonString}'. {e.Message}");
+                    //Console.WriteLine($"{lastModifiedTime}: ERROR: can't parse json '{jsonString}'. {e.Message}");
                     continue;
                 }
 
@@ -45,22 +47,20 @@ namespace TimerTriggerProcessor
                 foreach (var trigger in triggers)
                 {
                     string triggerType = trigger.type;
-                    if (_triggersByType.TryGetValue(triggerType, out int count))
-                    {
-                        _triggersByType[triggerType] = count + 1;
-                    }
-                    else
-                    {
-                        _triggersByType[triggerType] = 1;
-                    }
+                    _triggersCounter.AddString(triggerType);
 
                     if (triggerType == "timerTrigger")
                     {
                         string cronExpression = trigger.schedule;
-                        if (IsFrequentCronExpression(cronExpression))
+                        string functionName = trigger.functionName;
+                        if (IsFrequentCronExpression(cronExpression) && IsTemplateFunctionName(functionName))
                         {
                             hasFrequentCronExpression = true;
-                            //Console.WriteLine(trigger.schedule);
+                            if (functionName != null)
+                            {
+                                //Console.WriteLine($"{trigger.functionName}: {trigger.schedule}");
+                                _funcNameCounter.AddString(functionName);
+                            }
                             continue;
                         }
                         else
@@ -78,7 +78,15 @@ namespace TimerTriggerProcessor
                 //Console.WriteLine(JsonConvert.SerializeObject(modifiedTriggers));
             }
 
-            foreach (var pair in _triggersByType.OrderByDescending(p => p.Value))
+            foreach (var pair in _triggersCounter.OrderByDescending(p => p.Value))
+            {
+                Console.WriteLine($"{pair.Key}: {pair.Value}");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Trigger function names:");
+
+            foreach (var pair in _funcNameCounter.OrderByDescending(p => p.Value).Take(200))
             {
                 Console.WriteLine($"{pair.Key}: {pair.Value}");
             }
@@ -104,6 +112,41 @@ namespace TimerTriggerProcessor
                 //Console.WriteLine($"ERROR: Can't parse CRON expression '{cronExpression}'. {e.Message}");
                 return false;
             }
+        }
+
+        static string[] _templatePrefixes = new[] {
+            "TimerTriggerCSharp",
+            "TimerTriggerJS",
+            "TimerTriggerNodeJS",
+            "TimerTriggerPowerShell",
+            "TimerTriggerFSharp",
+            "Function",
+            "TestTimerTrigger",
+            "TimerTriggerTest",
+            "MyTimerTrigger",
+            "TestFunction"
+        };
+
+        static bool IsTemplateFunctionName(string functionName)
+        {
+            if (functionName == null) return false;
+
+            if (functionName.IndexOf("python", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+
+            foreach (var prefix in _templatePrefixes)
+            {
+                if (MatchesPrefixWithNumberSuffix(functionName, prefix)) return true;
+            }
+
+            return false;
+        }
+
+        static bool MatchesPrefixWithNumberSuffix(string s, string prefix)
+        {
+            if (!s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+
+            string suffix = s.Substring(prefix.Length);
+            return suffix.Length == 0 || Int32.TryParse(suffix, out int dummy);
         }
     }
 }
