@@ -1,4 +1,5 @@
-﻿using NCrontab;
+﻿using CsvHelper;
+using NCrontab;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -10,12 +11,18 @@ namespace TimerTriggerProcessor
 {
     class Program
     {
+        static bool _debug = true;
+
         static void Main(string[] args)
         {
-            StringCounter _triggersCounter = new StringCounter();
-            StringCounter _funcNameCounter = new StringCounter();
+            var outputFileWriter = new StreamWriter(args[1]);
+            var csv = new CsvWriter(outputFileWriter);
+
+            var _triggersCounter = new StringCounter();
+            var _funcNameCounter = new StringCounter();
             int appsWithFrequentTimerTriggers = 0;
 
+            // Go through each function app
             foreach (var line in File.ReadAllLines(args[0]).Skip(1))
             {
                 var parts = line.Split(',');
@@ -44,6 +51,7 @@ namespace TimerTriggerProcessor
 
                 bool hasFrequentCronExpression = false;
 
+                // Go through each trigger
                 foreach (var trigger in triggers)
                 {
                     string triggerType = trigger.type;
@@ -72,28 +80,43 @@ namespace TimerTriggerProcessor
                     modifiedTriggers.Add(trigger);
                 }
 
-                if (hasFrequentCronExpression) appsWithFrequentTimerTriggers++;
+                if (hasFrequentCronExpression)
+                {
+                    appsWithFrequentTimerTriggers++;
 
-                //Console.WriteLine(JsonConvert.SerializeObject(triggers));
-                //Console.WriteLine(JsonConvert.SerializeObject(modifiedTriggers));
+                    csv.WriteRecord(new
+                    {
+                        SourceStamp = stamp,
+                        SiteName = site,
+                        NewTriggers = JsonConvert.SerializeObject(modifiedTriggers)
+                    });
+                    outputFileWriter.WriteLine();
+                    //Console.WriteLine(JsonConvert.SerializeObject(triggers));
+                    //Console.WriteLine(JsonConvert.SerializeObject(modifiedTriggers));
+                    //Console.WriteLine();
+                    csv.Flush();
+                }
             }
 
-            foreach (var pair in _triggersCounter.OrderByDescending(p => p.Value))
+            if (_debug)
             {
-                Console.WriteLine($"{pair.Key}: {pair.Value}");
+                foreach (var pair in _triggersCounter.OrderByDescending(p => p.Value))
+                {
+                    Console.WriteLine($"{pair.Key}: {pair.Value}");
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("Trigger function names:");
+
+                foreach (var pair in _funcNameCounter.OrderByDescending(p => p.Value).Take(200))
+                {
+                    Console.WriteLine($"{pair.Key}: {pair.Value}");
+                }
+
+                Console.WriteLine();
+
+                Console.WriteLine($"Apps with frequent timer triggers: {appsWithFrequentTimerTriggers}");
             }
-
-            Console.WriteLine();
-            Console.WriteLine("Trigger function names:");
-
-            foreach (var pair in _funcNameCounter.OrderByDescending(p => p.Value).Take(200))
-            {
-                Console.WriteLine($"{pair.Key}: {pair.Value}");
-            }
-
-            Console.WriteLine();
-
-            Console.WriteLine($"Apps with frequent timer triggers: {appsWithFrequentTimerTriggers}");
         }
 
         static bool IsFrequentCronExpression(string cronExpression)
@@ -121,10 +144,7 @@ namespace TimerTriggerProcessor
             "TimerTriggerPowerShell",
             "TimerTriggerFSharp",
             "Function",
-            "TestTimerTrigger",
-            "TimerTriggerTest",
-            "MyTimerTrigger",
-            "TestFunction"
+            "MyTimerTrigger"
         };
 
         static bool IsTemplateFunctionName(string functionName)
@@ -132,6 +152,12 @@ namespace TimerTriggerProcessor
             if (functionName == null) return false;
 
             if (functionName.IndexOf("python", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+
+            if (functionName.StartsWith("test", StringComparison.OrdinalIgnoreCase) ||
+                functionName.EndsWith("test", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
 
             foreach (var prefix in _templatePrefixes)
             {
